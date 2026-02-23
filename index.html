@@ -1,0 +1,1606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Telegram Chat Log Exporter</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0c0c0e;
+  --surface:#141416;
+  --surface2:#1c1c1f;
+  --border:#252528;
+  --border2:#2e2e33;
+  --accent:#5b8dee;
+  --accent2:#e8a84b;
+  --green:#4caf82;
+  --text:#dddde8;
+  --text-muted:#7c7c8e;
+  --text-dim:#3a3a45;
+  --r:6px;
+}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:12.5px;
+  min-height:100vh;
+  overflow:hidden;
+}
+
+/* ── LOADING SCREEN ── */
+#loadScreen{
+  position:fixed;inset:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:32px;z-index:200;background:var(--bg);
+}
+#loadScreen h1{
+  font-family:'Syne',sans-serif;font-size:28px;font-weight:800;
+  letter-spacing:-0.5px;
+}
+#loadScreen h1 span{color:var(--accent);}
+.dropzone{
+  width:480px;border:1.5px dashed var(--border2);
+  border-radius:12px;padding:48px 32px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  cursor:pointer;transition:all .2s;text-align:center;
+}
+.dropzone:hover,.dropzone.drag{border-color:var(--accent);background:rgba(91,141,238,.05);}
+.dropzone svg{opacity:.4;}
+.dropzone .dz-title{font-family:'Syne',sans-serif;font-size:15px;font-weight:600;color:var(--text);}
+.dropzone .dz-sub{color:var(--text-muted);font-size:11.5px;line-height:1.6;}
+.dropzone .dz-badge{
+  font-size:11px;background:var(--surface2);border:1px solid var(--border2);
+  padding:4px 12px;border-radius:100px;color:var(--text-muted);margin-top:4px;
+}
+#fileInput{display:none;}
+
+/* ── PARSE PROGRESS OVERLAY ── */
+#parseOverlay{
+  position:fixed;inset:0;z-index:300;
+  background:var(--bg);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:24px;
+}
+#parseOverlay.active{display:flex;}
+.parse-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;}
+.parse-sub{font-size:11.5px;color:var(--text-muted);}
+.parse-bar-wrap{width:340px;height:3px;background:var(--surface2);border-radius:3px;overflow:hidden;}
+.parse-bar{height:100%;background:var(--accent);border-radius:3px;transition:width .2s;width:0%;}
+.parse-count{font-size:11px;color:var(--text-dim);}
+
+/* ── MAIN LAYOUT ── */
+#app{display:none;height:100vh;grid-template-rows:52px 1fr 52px;grid-template-columns:1fr 300px;}
+#app.visible{display:grid;}
+
+/* ── TOPBAR ── */
+#topbar{
+  grid-column:1/-1;
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:0;padding:0;
+  background:var(--bg);
+}
+.topbar-brand{
+  padding:0 20px;
+  font-family:'Syne',sans-serif;font-weight:700;font-size:14px;
+  border-right:1px solid var(--border);height:100%;display:flex;align-items:center;gap:10px;
+}
+.topbar-brand .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);}
+.chat-info{
+  padding:0 18px;
+  display:flex;align-items:center;gap:12px;
+  flex:1;border-right:1px solid var(--border);height:100%;
+}
+.chat-name{font-weight:500;color:var(--text);font-size:13px;}
+.chat-badge{font-size:10px;background:var(--surface2);border:1px solid var(--border2);padding:2px 8px;border-radius:3px;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;}
+.topbar-filters{
+  padding:0 16px;display:flex;align-items:center;gap:8px;flex:1;height:100%;
+}
+.search-wrap{
+  position:relative;
+  width:32px;
+  max-width:260px;
+  transition:width .3s cubic-bezier(.4,0,.2,1);
+}
+.search-wrap:focus-within,
+.search-wrap.has-value{
+  width:220px;
+}
+.search-wrap input{
+  width:100%;background:transparent;border:1px solid transparent;
+  border-radius:var(--r);padding:6px 10px 6px 30px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  outline:none;
+  transition:background .25s, border-color .25s, padding .25s;
+  cursor:pointer;
+}
+.search-wrap:focus-within input,
+.search-wrap.has-value input{
+  background:var(--surface2);
+  border-color:var(--border);
+  cursor:text;
+}
+.search-wrap:focus-within input{border-color:var(--accent);}
+.search-wrap svg{
+  position:absolute;left:9px;top:50%;transform:translateY(-50%);
+  opacity:.35;transition:opacity .25s, color .25s;
+  pointer-events:none;
+}
+.search-wrap:focus-within svg,
+.search-wrap.has-value svg{opacity:.6;color:var(--accent);}
+.sel-wrap{position:relative;}
+.sel-wrap select{
+  appearance:none;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);padding:6px 28px 6px 10px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  outline:none;cursor:pointer;min-width:130px;
+}
+.sel-arrow{position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;opacity:.4;}
+.topbar-actions{padding:0 16px;display:flex;align-items:center;gap:8px;height:100%;}
+.btn{
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  cursor:pointer;border-radius:var(--r);padding:7px 14px;
+  transition:all .15s;border:none;letter-spacing:.02em;
+}
+.btn-ghost{background:transparent;color:var(--text-muted);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--text);border-color:var(--border2);}
+.btn-primary{background:var(--accent);color:#fff;font-weight:500;}
+.btn-primary:hover{background:#6e9af0;}
+.btn-primary:disabled{background:var(--text-dim);color:var(--text-muted);cursor:not-allowed;}
+.btn-sm{padding:5px 10px;font-size:11px;}
+
+/* ── MESSAGE LIST ── */
+#msgList{
+  overflow-y:auto;padding:16px;
+  display:flex;flex-direction:column;gap:2px;
+  border-right:1px solid var(--border);
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;
+}
+
+.date-sep{
+  display:flex;align-items:center;gap:10px;
+  margin:14px 0 8px;color:var(--text-dim);
+  font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+}
+.date-sep::before,.date-sep::after{content:'';flex:1;height:1px;background:var(--border);}
+
+.msg-row{
+  display:flex;gap:10px;align-items:flex-start;
+  padding:10px 12px;border-radius:var(--r);
+  border:1px solid transparent;cursor:pointer;
+  transition:all .1s;
+}
+.msg-row:hover{background:var(--surface);border-color:var(--border);}
+.msg-row.selected{background:var(--surface);border-color:var(--border);}
+.msg-row.selected{box-shadow:inset 3px 0 0 var(--accent);}
+
+.cb{
+  width:16px;height:16px;flex-shrink:0;margin-top:2px;
+  border:1px solid var(--border2);border-radius:3px;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .1s;
+}
+.msg-row.selected .cb{background:var(--accent);border-color:var(--accent);}
+.cb svg{display:none;}
+.msg-row.selected .cb svg{display:block;}
+
+.msg-inner{flex:1;min-width:0;}
+.msg-head{display:flex;align-items:baseline;gap:8px;margin-bottom:5px;}
+.msg-author{font-weight:500;font-size:11.5px;}
+.msg-author.user0{color:#5b8dee;}
+.msg-author.user1{color:#e8a84b;}
+.msg-author.user2{color:#4caf82;}
+.msg-author.user3{color:#cf6fc2;}
+.msg-author.user4{color:#e86b6b;}
+.msg-time{font-size:10.5px;color:var(--text-dim);}
+.msg-edited{font-size:10px;color:var(--text-dim);font-style:italic;}
+
+.msg-reply{
+  border-left:2px solid var(--border2);
+  padding-left:8px;margin-bottom:6px;
+  color:var(--text-dim);font-size:11px;line-height:1.5;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  cursor:pointer;border-radius:0 3px 3px 0;
+  transition:background .15s, border-color .15s, color .15s;
+}
+.msg-reply:hover{
+  background:rgba(91,141,238,.08);
+  border-color:var(--accent);
+  color:var(--text-muted);
+}
+.msg-reply .reply-author{color:var(--text-muted);}
+.msg-reply:hover .reply-author{color:var(--accent);}
+@keyframes flash-highlight{
+  0%  {background:rgba(91,141,238,.22);border-color:var(--accent);}
+  60% {background:rgba(91,141,238,.12);border-color:var(--accent);}
+  100%{background:transparent;border-color:transparent;}
+}
+.msg-row.flash{animation:flash-highlight .9s ease-out forwards;}
+
+.msg-text{
+  color:var(--text-muted);line-height:1.65;font-size:12px;
+  white-space:pre-wrap;word-break:break-word;
+}
+.msg-row.selected .msg-text{color:var(--text);}
+.msg-media{
+  margin-top:6px;font-size:10.5px;color:var(--text-dim);
+  border:1px solid var(--border);border-radius:3px;
+  padding:4px 8px;display:inline-flex;align-items:center;gap:5px;
+}
+
+/* ── MULTI-SELECT SENDER DROPDOWN ── */
+.ms-wrap{position:relative;}
+.ms-btn{
+  display:flex;align-items:center;gap:7px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);padding:6px 10px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  cursor:pointer;min-width:148px;transition:border-color .15s;white-space:nowrap;
+  user-select:none;
+}
+.ms-btn:hover{border-color:var(--border2);}
+.ms-btn.active-filter{border-color:var(--accent);color:var(--accent);}
+.ms-btn .ms-label{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;}
+.ms-btn .ms-arrow{opacity:.4;flex-shrink:0;transition:transform .15s;}
+.ms-btn.open .ms-arrow{transform:rotate(180deg);}
+.ms-badge{
+  background:var(--accent);color:#fff;border-radius:100px;
+  font-size:9.5px;padding:1px 6px;font-weight:600;flex-shrink:0;
+}
+
+.ms-panel{
+  position:absolute;top:calc(100% + 5px);left:0;z-index:100;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:var(--r);min-width:210px;max-width:280px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  display:none;flex-direction:column;overflow:hidden;
+}
+.ms-panel.open{display:flex;}
+.ms-panel-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 10px 6px;border-bottom:1px solid var(--border);
+  font-size:10px;color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase;
+}
+.ms-panel-actions{display:flex;gap:8px;}
+.ms-panel-actions span{
+  color:var(--accent);cursor:pointer;font-size:10px;letter-spacing:0;text-transform:none;
+}
+.ms-panel-actions span:hover{text-decoration:underline;}
+.ms-search{
+  position:relative;padding:7px 8px;border-bottom:1px solid var(--border);
+}
+.ms-search input{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);padding:5px 8px 5px 26px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  outline:none;transition:border-color .15s;
+}
+.ms-search input:focus{border-color:var(--accent);}
+.ms-search svg{position:absolute;left:15px;top:50%;transform:translateY(-50%);opacity:.3;pointer-events:none;}
+.ms-empty{
+  padding:16px 10px;text-align:center;font-size:11px;color:var(--text-dim);
+}
+.ms-list{max-height:200px;overflow-y:auto;padding:4px 0;
+  scrollbar-width:thin;scrollbar-color:var(--border2) transparent;}
+.ms-item{
+  display:flex;align-items:center;gap:9px;
+  padding:7px 10px;cursor:pointer;transition:background .1s;
+  font-size:11.5px;
+}
+.ms-item:hover{background:var(--surface2);}
+.ms-item.checked{background:rgba(91,141,238,.06);}
+.ms-checkbox{
+  width:14px;height:14px;flex-shrink:0;
+  border:1px solid var(--border2);border-radius:3px;
+  display:flex;align-items:center;justify-content:center;transition:all .1s;
+}
+.ms-item.checked .ms-checkbox{background:var(--accent);border-color:var(--accent);}
+.ms-checkbox svg{display:none;}
+.ms-item.checked .ms-checkbox svg{display:block;}
+.ms-item-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.ms-item-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);}
+.ms-item.checked .ms-item-name{color:var(--text);}
+.ms-item-cnt{color:var(--text-dim);font-size:10.5px;}
+
+/* ── DATE RANGE PICKER ── */
+.dr-wrap{position:relative;}
+.dr-btn{
+  display:flex;align-items:center;gap:7px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);padding:6px 10px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  cursor:pointer;min-width:138px;transition:border-color .15s;white-space:nowrap;
+  user-select:none;
+}
+.dr-btn:hover{border-color:var(--border2);}
+.dr-btn.active-filter{border-color:var(--accent);color:var(--accent);}
+.dr-btn .dr-label{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;}
+.dr-btn .dr-arrow{opacity:.4;flex-shrink:0;transition:transform .15s;}
+.dr-btn.open .dr-arrow{transform:rotate(180deg);}
+
+.dr-panel{
+  position:absolute;top:calc(100% + 5px);left:0;z-index:100;
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:var(--r);width:260px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  display:none;flex-direction:column;overflow:hidden;
+}
+.dr-panel.open{display:flex;}
+.dr-panel-head{
+  padding:10px 12px 8px;border-bottom:1px solid var(--border);
+  font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);
+}
+.dr-presets{
+  display:flex;flex-wrap:wrap;gap:5px;padding:10px 12px;
+  border-bottom:1px solid var(--border);
+}
+.dr-preset{
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+  background:var(--surface2);border:1px solid var(--border2);
+  border-radius:3px;padding:4px 9px;cursor:pointer;color:var(--text-muted);
+  transition:all .12s;
+}
+.dr-preset:hover{border-color:var(--accent);color:var(--accent);}
+.dr-preset.active{background:rgba(91,141,238,.12);border-color:var(--accent);color:var(--accent);}
+.dr-inputs{display:flex;flex-direction:column;gap:8px;padding:10px 12px;}
+.dr-input-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted);}
+.dr-input-label{width:28px;flex-shrink:0;}
+.dr-input{
+  flex:1;background:var(--surface2);border:1px solid var(--border);
+  border-radius:var(--r);padding:5px 8px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  outline:none;transition:border-color .15s;
+  color-scheme:dark;
+}
+.dr-input:focus{border-color:var(--accent);}
+.dr-input::-webkit-calendar-picker-indicator{filter:invert(.5);cursor:pointer;}
+.dr-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;border-top:1px solid var(--border);
+}
+.dr-clear{
+  font-size:10.5px;color:var(--text-dim);cursor:pointer;
+  background:none;border:none;font-family:'IBM Plex Mono',monospace;
+  padding:0;transition:color .12s;
+}
+.dr-clear:hover{color:var(--text-muted);}
+.dr-apply{
+  font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+  background:var(--accent);color:#fff;border:none;
+  border-radius:var(--r);padding:5px 12px;cursor:pointer;
+  transition:background .12s;
+}
+.dr-apply:hover{background:#6e9af0;}
+
+/* ── LOAD MORE SENTINEL ── */
+#loadMoreSentinel{
+  height:40px;display:flex;align-items:center;justify-content:center;
+  color:var(--text-dim);font-size:11px;
+}
+
+/* ── SIDEBAR ── */
+#sidebar{
+  display:flex;flex-direction:column;gap:0;overflow:hidden;
+}
+.sb-section{
+  padding:16px 18px;border-bottom:1px solid var(--border);
+}
+.sb-title{
+  font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-dim);margin-bottom:12px;
+}
+.stat-grid{display:flex;flex-direction:column;gap:0;}
+.stat-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:7px 0;border-bottom:1px solid var(--border);font-size:11.5px;
+}
+.stat-row:last-child{border:none;}
+.stat-k{color:var(--text-muted);}
+.stat-v{color:var(--text);font-weight:500;}
+.stat-v.hi{color:var(--accent);}
+
+.participant-list{display:flex;flex-direction:column;gap:5px;}
+.participant-item{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;border-radius:var(--r);
+  background:var(--surface);border:1px solid var(--border);
+  cursor:pointer;transition:all .12s;font-size:11.5px;
+}
+.participant-item:hover{border-color:var(--border2);}
+.participant-item.active{border-color:var(--accent);background:rgba(91,141,238,.07);}
+.p-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.p-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.p-cnt{color:var(--text-dim);font-size:10.5px;}
+
+.opt-list{display:flex;flex-direction:column;gap:10px;}
+.opt-row{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;}
+.opt-k{color:var(--text-muted);}
+.toggle{
+  width:32px;height:17px;background:var(--surface2);
+  border:1px solid var(--border2);border-radius:100px;
+  cursor:pointer;position:relative;transition:background .15s;
+  flex-shrink:0;
+}
+.toggle.on{background:var(--accent);border-color:var(--accent);}
+.toggle::after{
+  content:'';position:absolute;
+  width:11px;height:11px;background:var(--text-dim);
+  border-radius:50%;top:2px;left:2px;
+  transition:transform .15s,background .15s;
+}
+.toggle.on::after{transform:translateX(15px);background:#fff;}
+
+.fn-wrap{margin-top:10px;}
+.fn-label{font-size:10px;color:var(--text-dim);margin-bottom:5px;}
+.fn-input{
+  width:100%;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);padding:7px 9px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11.5px;
+  outline:none;transition:border-color .15s;
+}
+.fn-input:focus{border-color:var(--accent);}
+
+.sb-export{padding:16px 18px;margin-top:auto;}
+
+/* ── FOOTER ── */
+#footer{
+  grid-column:1/-1;border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;padding:0 20px;
+  background:var(--bg);font-size:11.5px;color:var(--text-muted);
+}
+.foot-stat strong{color:var(--accent);}
+.prog{flex:1;height:2px;background:var(--surface2);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .2s;}
+
+/* ── EMPTY ── */
+.empty-msg{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--text-dim);font-size:12px;
+}
+
+/* ── TOAST ── */
+#toast{
+  position:fixed;bottom:72px;left:50%;
+  transform:translateX(-50%) translateY(10px);
+  background:var(--surface2);border:1px solid var(--border2);
+  color:var(--text);padding:8px 18px;border-radius:100px;
+  font-size:11.5px;opacity:0;pointer-events:none;transition:all .2s;z-index:999;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.ok{border-color:var(--green);color:var(--green);}
+</style>
+</head>
+<body>
+
+<!-- LOAD SCREEN -->
+<div id="loadScreen">
+  <h1>Telegram Chat <span>Exporter</span></h1>
+  <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <div class="dz-title">Drop your Telegram export JSON</div>
+    <div class="dz-sub">Export your chat from Telegram Desktop:<br><strong>⋯ Menu → Export Chat History → JSON format</strong></div>
+    <div class="dz-badge">result.json</div>
+  </div>
+  <input type="file" id="fileInput" accept=".json">
+</div>
+
+<!-- PARSE OVERLAY -->
+<div id="parseOverlay">
+  <div class="parse-title">Processing chat file…</div>
+  <div class="parse-bar-wrap"><div class="parse-bar" id="parseBar"></div></div>
+  <div class="parse-sub" id="parseSub">Reading file…</div>
+  <div class="parse-count" id="parseCount"></div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+
+  <!-- TOPBAR -->
+  <div id="topbar">
+    <div class="topbar-brand">
+      <div class="dot"></div>
+      <span>TG Exporter</span>
+    </div>
+    <div class="chat-info">
+      <span class="chat-name" id="chatNameDisplay">—</span>
+      <span class="chat-badge" id="chatTypeDisplay">—</span>
+      <span class="chat-badge" id="msgCountDisplay">— messages</span>
+    </div>
+    <div class="topbar-filters">
+      <div class="search-wrap">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="searchInput" placeholder="Search messages…" oninput="debouncedFilter();this.closest('.search-wrap').classList.toggle('has-value',this.value.length>0)">
+      </div>
+      <div class="ms-wrap" id="senderDropdownWrap">
+        <div class="ms-btn" id="senderDropdownBtn" onclick="toggleSenderDropdown()">
+          <span class="ms-label" id="senderDropdownLabel">All senders</span>
+          <span class="ms-badge" id="senderDropdownBadge" style="display:none"></span>
+          <svg class="ms-arrow" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="ms-panel" id="senderDropdownPanel">
+          <div class="ms-panel-head">
+            <span>Filter senders</span>
+            <div class="ms-panel-actions">
+              <span onclick="selectAllSenders()">All</span>
+              <span onclick="clearSenderFilter()">Clear</span>
+            </div>
+          </div>
+          <div class="ms-search">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="senderSearch" placeholder="Search senders..." oninput="filterSenderList()" autocomplete="off">
+          </div>
+          <div class="ms-list" id="senderDropdownList"></div>
+        </div>
+      </div>
+      <div class="dr-wrap" id="dateRangeWrap">
+        <div class="dr-btn" id="dateRangeBtn" onclick="toggleDateRange()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.4;flex-shrink:0"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span class="dr-label" id="dateRangeLabel">All dates</span>
+          <svg class="dr-arrow" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        </div>
+        <div class="dr-panel" id="dateRangePanel">
+          <div class="dr-panel-head">Date range</div>
+          <div class="dr-presets" id="datePresets">
+            <div class="dr-preset" data-preset="7d"   onclick="applyPreset(this)">Last 7 days</div>
+            <div class="dr-preset" data-preset="30d"  onclick="applyPreset(this)">Last 30 days</div>
+            <div class="dr-preset" data-preset="90d"  onclick="applyPreset(this)">Last 3 months</div>
+            <div class="dr-preset" data-preset="365d" onclick="applyPreset(this)">Last year</div>
+            <div class="dr-preset" data-preset="all"  onclick="applyPreset(this)">All time</div>
+          </div>
+          <div class="dr-inputs">
+            <div class="dr-input-row">
+              <span class="dr-input-label">From</span>
+              <input class="dr-input" type="date" id="dateFrom" onchange="onDateInputChange()">
+            </div>
+            <div class="dr-input-row">
+              <span class="dr-input-label">To</span>
+              <input class="dr-input" type="date" id="dateTo" onchange="onDateInputChange()">
+            </div>
+          </div>
+          <div class="dr-footer">
+            <button class="dr-clear" onclick="clearDateRange()">Clear</button>
+            <button class="dr-apply" onclick="commitDateRange()">Apply</button>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="selectVisible()">Select All</button>
+      <button class="btn btn-ghost btn-sm" onclick="deselectAll()">Clear</button>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="loadNew()">↩ Load new file</button>
+      <button class="btn btn-ghost btn-sm" id="exportJsonBtnTop" onclick="exportJson()" disabled>Export .json</button>
+      <button class="btn btn-primary" id="exportBtn" onclick="exportDocx()" disabled>Export .docx</button>
+    </div>
+  </div>
+
+  <!-- MESSAGE LIST -->
+  <div id="msgList">
+    <div id="loadMoreSentinel"></div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div class="sb-section">
+      <div class="sb-title">Selection Stats</div>
+      <div class="stat-grid">
+        <div class="stat-row"><span class="stat-k">Total messages</span><span class="stat-v" id="statTotal">0</span></div>
+        <div class="stat-row"><span class="stat-k">Visible</span><span class="stat-v" id="statVisible">0</span></div>
+        <div class="stat-row"><span class="stat-k">Selected</span><span class="stat-v hi" id="statSelected">0</span></div>
+        <div class="stat-row"><span class="stat-k">Senders</span><span class="stat-v" id="statSenders">0</span></div>
+      </div>
+    </div>
+
+    <div class="sb-section">
+      <div class="sb-title">Participants</div>
+      <div class="participant-list" id="participantList"></div>
+    </div>
+
+    <div class="sb-section" style="flex:1;overflow-y:auto;">
+      <div class="sb-title">Document Options</div>
+      <div class="opt-list">
+        <div class="opt-row"><span class="opt-k">Doc header block</span><div class="toggle on" id="togHeader" onclick="this.classList.toggle('on')"></div></div>
+        <div class="opt-row"><span class="opt-k">Date dividers</span><div class="toggle on" id="togDates" onclick="this.classList.toggle('on')"></div></div>
+        <div class="opt-row"><span class="opt-k">Timestamps</span><div class="toggle on" id="togTime" onclick="this.classList.toggle('on')"></div></div>
+        <div class="opt-row"><span class="opt-k">Reply context</span><div class="toggle on" id="togReply" onclick="this.classList.toggle('on')"></div></div>
+        <div class="opt-row"><span class="opt-k">Edited markers</span><div class="toggle" id="togEdited" onclick="this.classList.toggle('on')"></div></div>
+        <div class="opt-row"><span class="opt-k">Media notes</span><div class="toggle on" id="togMedia" onclick="this.classList.toggle('on')"></div></div>
+      </div>
+      <div class="fn-wrap">
+        <div class="fn-label">Output filename</div>
+        <input class="fn-input" id="filenameInput" type="text" value="chat_transcript" placeholder="filename">
+      </div>
+    </div>
+
+    <div class="sb-export">
+      <button class="btn btn-primary" style="width:100%;justify-content:center;display:flex;" id="exportBtn2" onclick="exportDocx()" disabled>
+        Export Selected as .docx
+      </button>
+      <button class="btn btn-ghost" style="width:100%;justify-content:center;display:flex;margin-top:6px;" id="exportJsonBtn" onclick="exportJson()" disabled>
+        Export Selected as .json
+      </button>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div id="footer">
+    <span class="foot-stat">Selected: <strong id="footCount">0</strong> messages</span>
+    <div class="prog"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+    <span style="color:var(--text-dim)" id="footHint">Select messages to export</span>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let allMessages = [];       // processed message objects
+let filteredMsgs = [];      // current filtered view (array, ordered)
+let filteredIds = new Set();
+let selectedIds = new Set();
+let chatMeta = {};
+let senderColors = {};
+let senderCounts = {};      // precomputed: sender → message count
+const COLOR_CLASSES = ['user0','user1','user2','user3','user4'];
+let colorIndex = 0;
+
+// Pagination state for progressive rendering
+const PAGE_SIZE = 100;
+let renderedUpTo = 0;       // how many of filteredMsgs have been rendered
+
+const PALETTE = ['#5b8dee','#e8a84b','#4caf82','#cf6fc2','#e86b6b'];
+let activeSenders = new Set();   // multi-select: empty = all senders shown
+let allSenders = [];             // ordered list of senders (for dropdown)
+
+// ─────────────────────────────────────────────
+// LOAD SCREEN
+// ─────────────────────────────────────────────
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) processFile(e.target.files[0]);
+});
+
+function loadNew() {
+  selectedIds.clear();
+  activeSenders.clear();
+  dateRangeFrom = '';
+  dateRangeTo   = '';
+  allMessages  = [];
+  filteredMsgs = [];
+  renderedUpTo = 0;
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('loadScreen').style.display = 'flex';
+  fileInput.value = '';
+}
+
+// ─────────────────────────────────────────────
+// FILE PROCESSING — Web Worker via Blob URL
+// Offloads JSON.parse to a background thread so
+// the main thread stays responsive on large files.
+// ─────────────────────────────────────────────
+const WORKER_SRC = `
+self.onmessage = function(e) {
+  const text = e.data;
+  try {
+    // Report progress: reading done
+    self.postMessage({ type: 'progress', phase: 'parsing', pct: 10 });
+
+    const data = JSON.parse(text);
+
+    self.postMessage({ type: 'progress', phase: 'parsing', pct: 50 });
+
+    if (!data.messages) {
+      self.postMessage({ type: 'error', msg: 'No messages array found in JSON' });
+      return;
+    }
+
+    // Filter and extract only what we need in the worker
+    const raw = data.messages.filter(m => m.type === 'message' && m.from);
+    const total = raw.length;
+
+    self.postMessage({ type: 'progress', phase: 'extracting', pct: 60, total });
+
+    // Build id→{from, text} map for reply lookups (lightweight)
+    const msgMap = {};
+    for (let i = 0; i < raw.length; i++) {
+      const m = raw[i];
+      msgMap[m.id] = { from: m.from, text: m.text };
+    }
+
+    self.postMessage({ type: 'progress', phase: 'extracting', pct: 75, total });
+
+    // Process messages
+    const msgs = [];
+    for (let i = 0; i < raw.length; i++) {
+      const m = raw[i];
+      const textField = m.text;
+      let text = '';
+      if (typeof textField === 'string') {
+        text = textField;
+      } else if (Array.isArray(textField)) {
+        text = textField.map(p => (typeof p === 'string' ? p : (p.text || ''))).join('');
+      }
+
+      let replyFrom = null, replyText = '';
+      if (m.reply_to_message_id && msgMap[m.reply_to_message_id]) {
+        const rm = msgMap[m.reply_to_message_id];
+        replyFrom = rm.from;
+        const rf = rm.text;
+        replyText = typeof rf === 'string' ? rf :
+          Array.isArray(rf) ? rf.map(p => (typeof p === 'string' ? p : (p.text||''))).join('') : '';
+      }
+
+      msgs.push({
+        id: m.id,
+        from: m.from,
+        from_id: m.from_id,
+        date: m.date,
+        dateISO: m.date ? m.date.slice(0, 10) : '',
+        dateMs: m.date ? new Date(m.date).getTime() : 0,
+        text,
+        textLower: text.toLowerCase(),
+        fromLower: (m.from || '').toLowerCase(),
+        edited: m.edited || null,
+        reply_to_id: m.reply_to_message_id || null,
+        replyFrom,
+        replyText,
+        forwarded_from: m.forwarded_from || null,
+        photo: m.photo || null,
+        file: m.file || null,
+        media_type: m.media_type || null,
+        _raw: m,
+      });
+    }
+
+    self.postMessage({ type: 'progress', phase: 'done', pct: 100 });
+    self.postMessage({ type: 'done', msgs, meta: { name: data.name, type: data.type, id: data.id } });
+  } catch(err) {
+    self.postMessage({ type: 'error', msg: err.message });
+  }
+};
+`;
+
+function processFile(file) {
+  // Show parse overlay
+  const overlay = document.getElementById('parseOverlay');
+  overlay.classList.add('active');
+  document.getElementById('loadScreen').style.display = 'none';
+  setParseProgress(5, 'Reading file…', '');
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    setParseProgress(10, 'Spawning parser…', '');
+
+    // Create an inline Web Worker to avoid blocking the main thread
+    const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+    const workerURL = URL.createObjectURL(blob);
+    const worker = new Worker(workerURL);
+
+    worker.onmessage = evt => {
+      const d = evt.data;
+      if (d.type === 'progress') {
+        const phases = { parsing: 'Parsing JSON…', extracting: 'Extracting messages…', done: 'Done!' };
+        const countTxt = d.total ? `${d.total.toLocaleString()} messages found` : '';
+        setParseProgress(d.pct, phases[d.phase] || '', countTxt);
+      } else if (d.type === 'done') {
+        worker.terminate();
+        URL.revokeObjectURL(workerURL);
+        overlay.classList.remove('active');
+        loadChat(d.msgs, d.meta);
+      } else if (d.type === 'error') {
+        worker.terminate();
+        URL.revokeObjectURL(workerURL);
+        overlay.classList.remove('active');
+        document.getElementById('loadScreen').style.display = 'flex';
+        showToast('Error: ' + d.msg, false);
+      }
+    };
+
+    worker.onerror = err => {
+      worker.terminate();
+      URL.revokeObjectURL(workerURL);
+      overlay.classList.remove('active');
+      document.getElementById('loadScreen').style.display = 'flex';
+      showToast('Worker error: ' + err.message, false);
+    };
+
+    worker.postMessage(e.target.result);
+  };
+
+  reader.onerror = () => {
+    overlay.classList.remove('active');
+    document.getElementById('loadScreen').style.display = 'flex';
+    showToast('Failed to read file', false);
+  };
+
+  reader.readAsText(file);
+}
+
+function setParseProgress(pct, sub, count) {
+  document.getElementById('parseBar').style.width = pct + '%';
+  document.getElementById('parseSub').textContent = sub;
+  document.getElementById('parseCount').textContent = count;
+}
+
+// ─────────────────────────────────────────────
+// PARSE & LOAD
+// ─────────────────────────────────────────────
+function extractText(textField) {
+  if (typeof textField === 'string') return textField;
+  if (Array.isArray(textField)) {
+    return textField.map(part => (typeof part === 'string' ? part : part.text || '')).join('');
+  }
+  return '';
+}
+
+function loadChat(msgs, meta) {
+  chatMeta = {
+    name: meta.name || 'Unknown Chat',
+    type: meta.type || 'unknown',
+    id: meta.id
+  };
+
+  allMessages = msgs;
+
+  // Build sender color map + precompute counts in one pass — O(n)
+  senderColors = {};
+  senderCounts = {};
+  colorIndex = 0;
+
+  for (const m of msgs) {
+    if (!senderColors[m.from]) {
+      senderColors[m.from] = COLOR_CLASSES[colorIndex % COLOR_CLASSES.length];
+      colorIndex++;
+      senderCounts[m.from] = 0;
+    }
+    senderCounts[m.from]++;
+  }
+
+  const senders = Object.keys(senderCounts);
+
+  allSenders = senders;
+
+  // Populate UI metadata
+  document.getElementById('chatNameDisplay').textContent = chatMeta.name;
+  document.getElementById('chatTypeDisplay').textContent = chatMeta.type.replace('_', ' ');
+  document.getElementById('msgCountDisplay').textContent = msgs.length.toLocaleString() + ' messages';
+  document.getElementById('statTotal').textContent = msgs.length.toLocaleString();
+  document.getElementById('statSenders').textContent = senders.length;
+
+  // Build multi-select sender dropdown
+  buildSenderDropdown(senders);
+
+  // Date range — find min/max dates in the dataset to constrain inputs
+  let minDateISO = '', maxDateISO = '';
+  for (const m of msgs) {
+    if (!m.dateISO) continue;
+    if (!minDateISO || m.dateISO < minDateISO) minDateISO = m.dateISO;
+    if (!maxDateISO || m.dateISO > maxDateISO) maxDateISO = m.dateISO;
+  }
+  document.getElementById('dateFrom').min = minDateISO;
+  document.getElementById('dateFrom').max = maxDateISO;
+  document.getElementById('dateTo').min   = minDateISO;
+  document.getElementById('dateTo').max   = maxDateISO;
+  // Reset any previous range
+  dateRangeFrom = '';
+  dateRangeTo   = '';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value   = '';
+  document.getElementById('dateRangeLabel').textContent = 'All dates';
+  document.getElementById('dateRangeBtn').classList.remove('active-filter');
+  document.querySelectorAll('.dr-preset').forEach(p => p.classList.remove('active'));
+
+  // Participants sidebar — uses precomputed counts
+  renderParticipants(senders);
+
+  // Show app
+  document.getElementById('app').classList.add('visible');
+
+  // Set up IntersectionObserver for progressive rendering
+  setupSentinel();
+
+  applyFilters();
+}
+
+// ─────────────────────────────────────────────
+// MULTI-SELECT SENDER DROPDOWN
+// ─────────────────────────────────────────────
+function buildSenderDropdown(senders) {
+  const list = document.getElementById('senderDropdownList');
+  list.innerHTML = '';
+  senders.forEach((s, i) => {
+    const cnt = senderCounts[s] || 0;
+    const item = document.createElement('div');
+    item.className = 'ms-item';
+    item.dataset.sender = s;
+    item.innerHTML = `
+      <div class="ms-checkbox">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <div class="ms-item-dot" style="background:${PALETTE[i % PALETTE.length]}"></div>
+      <span class="ms-item-name">${esc(s)}</span>
+      <span class="ms-item-cnt">${cnt.toLocaleString()}</span>
+    `;
+    item.addEventListener('click', () => {
+      if (activeSenders.has(s)) {
+        activeSenders.delete(s);
+        item.classList.remove('checked');
+      } else {
+        activeSenders.add(s);
+        item.classList.add('checked');
+      }
+      syncSenderUI();
+      applyFilters();
+    });
+    list.appendChild(item);
+  });
+}
+
+function toggleSenderDropdown() {
+  const panel = document.getElementById('senderDropdownPanel');
+  const btn   = document.getElementById('senderDropdownBtn');
+  const isOpen = panel.classList.contains('open');
+  if (isOpen) {
+    panel.classList.remove('open');
+    btn.classList.remove('open');
+  } else {
+    panel.classList.add('open');
+    btn.classList.add('open');
+    // Clear search and focus it when opening
+    const searchEl = document.getElementById('senderSearch');
+    searchEl.value = '';
+    filterSenderList();
+    setTimeout(() => searchEl.focus(), 50);
+  }
+}
+
+function filterSenderList() {
+  const q = document.getElementById('senderSearch').value.toLowerCase().trim();
+  const items = document.querySelectorAll('#senderDropdownList .ms-item');
+  let visibleCount = 0;
+
+  items.forEach(el => {
+    const name = (el.dataset.sender || '').toLowerCase();
+    const show = !q || name.includes(q);
+    el.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+
+  // Show/hide empty state
+  let emptyEl = document.getElementById('senderListEmpty');
+  if (visibleCount === 0) {
+    if (!emptyEl) {
+      emptyEl = document.createElement('div');
+      emptyEl.id = 'senderListEmpty';
+      emptyEl.className = 'ms-empty';
+      emptyEl.textContent = 'No senders found';
+      document.getElementById('senderDropdownList').appendChild(emptyEl);
+    }
+    emptyEl.style.display = '';
+  } else if (emptyEl) {
+    emptyEl.style.display = 'none';
+  }
+}
+
+function closeSenderDropdown() {
+  document.getElementById('senderDropdownPanel').classList.remove('open');
+  document.getElementById('senderDropdownBtn').classList.remove('open');
+  // Reset search so it's clean next time
+  const searchEl = document.getElementById('senderSearch');
+  if (searchEl) { searchEl.value = ''; filterSenderList(); }
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('senderDropdownWrap');
+  if (wrap && !wrap.contains(e.target)) closeSenderDropdown();
+});
+
+function selectAllSenders() {
+  activeSenders.clear();
+  document.querySelectorAll('#senderDropdownList .ms-item').forEach(el => el.classList.remove('checked'));
+  syncSenderUI();
+  applyFilters();
+}
+
+function clearSenderFilter() {
+  // same as selectAll — "clear" means no filter = all senders
+  selectAllSenders();
+}
+
+// Keep dropdown badge/label and sidebar participant items in sync
+function syncSenderUI() {
+  const total = allSenders.length;
+  const cnt = activeSenders.size;
+  const btn = document.getElementById('senderDropdownBtn');
+  const badge = document.getElementById('senderDropdownBadge');
+  const label = document.getElementById('senderDropdownLabel');
+
+  // Dropdown button label
+  if (cnt === 0) {
+    label.textContent = 'All senders';
+    badge.style.display = 'none';
+    btn.classList.remove('active-filter');
+  } else if (cnt === 1) {
+    label.textContent = [...activeSenders][0];
+    badge.style.display = 'none';
+    btn.classList.add('active-filter');
+  } else {
+    label.textContent = `${cnt} of ${total} senders`;
+    badge.textContent = cnt;
+    badge.style.display = '';
+    btn.classList.add('active-filter');
+  }
+
+  // Sync dropdown checkboxes
+  document.querySelectorAll('#senderDropdownList .ms-item').forEach(el => {
+    el.classList.toggle('checked', activeSenders.has(el.dataset.sender));
+  });
+
+  // Sync sidebar participant items
+  document.querySelectorAll('.participant-item').forEach(el => {
+    el.classList.toggle('active', activeSenders.has(el.dataset.sender));
+  });
+}
+
+// ─────────────────────────────────────────────
+// PARTICIPANTS SIDEBAR
+// Uses precomputed senderCounts — O(senders), not O(n)
+// ─────────────────────────────────────────────
+function renderParticipants(senders) {
+  const pl = document.getElementById('participantList');
+  pl.innerHTML = '';
+  senders.forEach((s, i) => {
+    const cnt = senderCounts[s] || 0;
+    const el = document.createElement('div');
+    el.className = 'participant-item';
+    el.dataset.sender = s;
+    el.innerHTML = `
+      <div class="p-dot" style="background:${PALETTE[i % PALETTE.length]}"></div>
+      <span class="p-name">${esc(s)}</span>
+      <span class="p-cnt">${cnt.toLocaleString()}</span>
+    `;
+    el.onclick = () => {
+      if (activeSenders.has(s)) {
+        activeSenders.delete(s);
+      } else {
+        activeSenders.add(s);
+      }
+      syncSenderUI();
+      applyFilters();
+    };
+    pl.appendChild(el);
+  });
+}
+
+// ─────────────────────────────────────────────
+// DATE RANGE PICKER
+// ─────────────────────────────────────────────
+let dateRangeFrom = ''; // ISO date string "YYYY-MM-DD" or ''
+let dateRangeTo   = ''; // ISO date string "YYYY-MM-DD" or ''
+
+function toggleDateRange() {
+  const panel = document.getElementById('dateRangePanel');
+  const btn   = document.getElementById('dateRangeBtn');
+  const isOpen = panel.classList.contains('open');
+  if (isOpen) { panel.classList.remove('open'); btn.classList.remove('open'); }
+  else         { panel.classList.add('open');    btn.classList.add('open'); }
+}
+
+function closeDateRange() {
+  document.getElementById('dateRangePanel').classList.remove('open');
+  document.getElementById('dateRangeBtn').classList.remove('open');
+}
+
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('dateRangeWrap');
+  if (wrap && !wrap.contains(e.target)) closeDateRange();
+});
+
+function applyPreset(el) {
+  document.querySelectorAll('.dr-preset').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+
+  const preset = el.dataset.preset;
+  const now = new Date();
+  const toISO = d => d.toISOString().slice(0, 10);
+
+  if (preset === 'all') {
+    document.getElementById('dateFrom').value = '';
+    document.getElementById('dateTo').value   = '';
+  } else {
+    const days = parseInt(preset);
+    const from = new Date(now);
+    from.setDate(from.getDate() - days);
+    document.getElementById('dateFrom').value = toISO(from);
+    document.getElementById('dateTo').value   = toISO(now);
+  }
+  commitDateRange();
+}
+
+function onDateInputChange() {
+  // Deactivate all presets when user manually edits inputs
+  document.querySelectorAll('.dr-preset').forEach(p => p.classList.remove('active'));
+}
+
+function commitDateRange() {
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  dateRangeFrom = from;
+  dateRangeTo   = to;
+
+  // Update button label
+  const btn   = document.getElementById('dateRangeBtn');
+  const label = document.getElementById('dateRangeLabel');
+  if (!from && !to) {
+    label.textContent = 'All dates';
+    btn.classList.remove('active-filter');
+  } else {
+    const fmtShort = iso => {
+      if (!iso) return '…';
+      const [y, m, d] = iso.split('-');
+      return `${d}/${m}/${y.slice(2)}`;
+    };
+    label.textContent = `${fmtShort(from)} → ${fmtShort(to)}`;
+    btn.classList.add('active-filter');
+  }
+
+  closeDateRange();
+  applyFilters();
+}
+
+function clearDateRange() {
+  dateRangeFrom = '';
+  dateRangeTo   = '';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value   = '';
+  document.getElementById('dateRangeLabel').textContent = 'All dates';
+  document.getElementById('dateRangeBtn').classList.remove('active-filter');
+  document.querySelectorAll('.dr-preset').forEach(p => p.classList.remove('active'));
+  closeDateRange();
+  applyFilters();
+}
+
+// ─────────────────────────────────────────────
+// FILTERS — debounced search, single-pass filter
+// ─────────────────────────────────────────────
+let filterTimer = null;
+function debouncedFilter() {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(applyFilters, 280);
+}
+
+function applyFilters() {
+  const search = document.getElementById('searchInput').value.toLowerCase().trim();
+  const hasSenderFilter = activeSenders.size > 0;
+  const hasDateFrom = !!dateRangeFrom;
+  const hasDateTo   = !!dateRangeTo;
+
+  // Single pass filter
+  filteredMsgs = [];
+  filteredIds  = new Set();
+
+  for (const m of allMessages) {
+    if (hasSenderFilter && !activeSenders.has(m.from)) continue;
+    if (hasDateFrom && m.dateISO < dateRangeFrom) continue;
+    if (hasDateTo   && m.dateISO > dateRangeTo)   continue;
+    if (search && !m.textLower.includes(search) && !m.fromLower.includes(search)) continue;
+    filteredMsgs.push(m);
+    filteredIds.add(m.id);
+  }
+
+  document.getElementById('statVisible').textContent = filteredMsgs.length.toLocaleString();
+
+  // Reset and progressively render
+  renderedUpTo = 0;
+  const list = document.getElementById('msgList');
+  // Clear everything except the sentinel
+  const sentinel = document.getElementById('loadMoreSentinel');
+  list.innerHTML = '';
+  list.appendChild(sentinel);
+
+  if (!filteredMsgs.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-msg';
+    empty.textContent = 'No messages match the current filters';
+    list.insertBefore(empty, sentinel);
+    sentinel.textContent = '';
+  } else {
+    renderNextPage();
+  }
+
+  updateStats();
+}
+
+// ─────────────────────────────────────────────
+// PROGRESSIVE RENDERING
+// Renders PAGE_SIZE rows at a time.
+// IntersectionObserver triggers next page when
+// the sentinel scrolls into view.
+// ─────────────────────────────────────────────
+let sentinelObserver = null;
+
+function setupSentinel() {
+  if (sentinelObserver) sentinelObserver.disconnect();
+
+  sentinelObserver = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) {
+      renderNextPage();
+    }
+  }, { root: document.getElementById('msgList'), rootMargin: '200px' });
+
+  sentinelObserver.observe(document.getElementById('loadMoreSentinel'));
+}
+
+function renderNextPage() {
+  if (renderedUpTo >= filteredMsgs.length) {
+    document.getElementById('loadMoreSentinel').textContent = '';
+    return;
+  }
+
+  const list = document.getElementById('msgList');
+  const sentinel = document.getElementById('loadMoreSentinel');
+  const end = Math.min(renderedUpTo + PAGE_SIZE, filteredMsgs.length);
+
+  // Use a DocumentFragment for batch DOM insertion — much faster
+  const frag = document.createDocumentFragment();
+  let lastDate = renderedUpTo === 0 ? null : filteredMsgs[renderedUpTo - 1]?._lastRenderedDate;
+
+  for (let i = renderedUpTo; i < end; i++) {
+    const m = filteredMsgs[i];
+    const dStr = new Date(m.dateMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
+    if (dStr !== lastDate) {
+      lastDate = dStr;
+      const sep = document.createElement('div');
+      sep.className = 'date-sep';
+      sep.textContent = dStr;
+      frag.appendChild(sep);
+    }
+
+    frag.appendChild(buildMsgRow(m));
+  }
+
+  renderedUpTo = end;
+  list.insertBefore(frag, sentinel);
+
+  const remaining = filteredMsgs.length - renderedUpTo;
+  sentinel.textContent = remaining > 0
+    ? `↓ ${remaining.toLocaleString()} more messages — scroll to load`
+    : '';
+}
+
+// Build a single message row DOM node (no innerHTML on the outer row)
+function buildMsgRow(m) {
+  const row = document.createElement('div');
+  row.className = 'msg-row' + (selectedIds.has(m.id) ? ' selected' : '');
+  row.id = 'row-' + m.id;
+
+  const timeStr = new Date(m.dateMs).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const colorCls = senderColors[m.from] || 'user0';
+
+  // Checkbox
+  const cb = document.createElement('div');
+  cb.className = 'cb';
+  cb.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>';
+
+  // Inner content
+  const inner = document.createElement('div');
+  inner.className = 'msg-inner';
+
+  // Header
+  const head = document.createElement('div');
+  head.className = 'msg-head';
+  head.innerHTML =
+    `<span class="msg-author ${colorCls}">${esc(m.from)}</span>` +
+    `<span class="msg-time">${timeStr}</span>` +
+    (m.edited ? '<span class="msg-edited">(edited)</span>' : '') +
+    (m.forwarded_from ? `<span class="msg-edited">↩ fwd: ${esc(m.forwarded_from)}</span>` : '');
+  inner.appendChild(head);
+
+  // Reply
+  if (m.replyFrom) {
+    const reply = document.createElement('div');
+    reply.className = 'msg-reply';
+    const preview = m.replyText.length > 80 ? m.replyText.slice(0, 80) + '…' : m.replyText;
+    reply.innerHTML = `<span class="reply-author">${esc(m.replyFrom)}: </span>${esc(preview)}`;
+    if (m.reply_to_id) {
+      reply.addEventListener('click', e => {
+        e.stopPropagation(); // don't toggle message selection
+        jumpToMessage(m.reply_to_id);
+      });
+    }
+    inner.appendChild(reply);
+  }
+
+  // Text
+  const textEl = document.createElement('div');
+  textEl.className = 'msg-text';
+  if (m.text) {
+    textEl.textContent = m.text; // textContent avoids XSS and is faster than innerHTML
+  } else if (!m.photo && !m.file) {
+    textEl.style.cssText = 'color:var(--text-dim);font-style:italic';
+    textEl.textContent = '[no text content]';
+  }
+  inner.appendChild(textEl);
+
+  // Media
+  if (m.photo) {
+    const med = document.createElement('div');
+    med.className = 'msg-media';
+    med.textContent = '📷 Photo';
+    inner.appendChild(med);
+  }
+  if (m.file) {
+    const med = document.createElement('div');
+    med.className = 'msg-media';
+    med.textContent = '📎 ' + (m.file.split('/').pop() || 'File');
+    inner.appendChild(med);
+  }
+
+  row.appendChild(cb);
+  row.appendChild(inner);
+  row.addEventListener('click', () => toggleMsg(m.id, row));
+  return row;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ─────────────────────────────────────────────
+// SELECTION
+// ─────────────────────────────────────────────
+function toggleMsg(id, row) {
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    row.classList.remove('selected');
+  } else {
+    selectedIds.add(id);
+    row.classList.add('selected');
+  }
+  updateStats();
+}
+
+function selectVisible() {
+  // Only update DOM nodes that are currently rendered
+  for (const id of filteredIds) {
+    selectedIds.add(id);
+    const row = document.getElementById('row-' + id);
+    if (row) row.classList.add('selected');
+  }
+  updateStats();
+}
+
+function deselectAll() {
+  // Only touch rendered rows
+  for (const id of selectedIds) {
+    const row = document.getElementById('row-' + id);
+    if (row) row.classList.remove('selected');
+  }
+  selectedIds.clear();
+  updateStats();
+}
+
+function updateStats() {
+  const cnt = selectedIds.size;
+  const total = allMessages.length;
+  document.getElementById('statSelected').textContent = cnt.toLocaleString();
+  document.getElementById('footCount').textContent = cnt.toLocaleString();
+  document.getElementById('progFill').style.width = total ? (cnt / total * 100) + '%' : '0%';
+  document.getElementById('footHint').textContent = cnt ? `${cnt.toLocaleString()} messages ready to export` : 'Select messages to export';
+  document.getElementById('exportBtn').disabled = cnt === 0;
+  document.getElementById('exportBtn2').disabled = cnt === 0;
+  document.getElementById('exportJsonBtn').disabled = cnt === 0;
+  const topJson = document.getElementById('exportJsonBtnTop');
+  if (topJson) topJson.disabled = cnt === 0;
+}
+
+// ─────────────────────────────────────────────
+// DOCX EXPORT
+// ─────────────────────────────────────────────
+async function exportDocx() {
+  if (selectedIds.size === 0) return;
+
+  const exportBtn  = document.getElementById('exportBtn');
+  const exportBtn2 = document.getElementById('exportBtn2');
+  const origText   = exportBtn2.textContent;
+  exportBtn.disabled  = true;
+  exportBtn2.disabled = true;
+  exportBtn2.textContent = 'Exporting…';
+
+  try {
+    const opts = {
+      header: document.getElementById('togHeader').classList.contains('on'),
+      dates:  document.getElementById('togDates').classList.contains('on'),
+      time:   document.getElementById('togTime').classList.contains('on'),
+      reply:  document.getElementById('togReply').classList.contains('on'),
+      edited: document.getElementById('togEdited').classList.contains('on'),
+      media:  document.getElementById('togMedia').classList.contains('on'),
+    };
+
+    // Collect selected messages in chronological order
+    // Only send fields the server needs — keeps payload small
+    const messages = allMessages
+      .filter(m => selectedIds.has(m.id))
+      .sort((a, b) => a.dateMs - b.dateMs)
+      .map(m => ({
+        id:             m.id,
+        from:           m.from,
+        dateMs:         m.dateMs,
+        text:           m.text,
+        edited:         m.edited,
+        forwarded_from: m.forwarded_from,
+        replyFrom:      m.replyFrom,
+        replyText:      m.replyText,
+        photo:          m.photo,
+        file:           m.file,
+      }));
+
+    const filename = document.getElementById('filenameInput').value.trim() || 'chat_transcript';
+
+    const response = await fetch('/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, opts, filename }),
+    });
+
+    if (!response.ok) {
+      // Try to read JSON error message from server
+      let errMsg = `Server error ${response.status}`;
+      try {
+        const errBody = await response.json();
+        if (errBody.error) errMsg = errBody.error;
+      } catch (_) {}
+      throw new Error(errMsg);
+    }
+
+    // Download the blob returned by the server
+    const blob = await response.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = filename + '.docx';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast(`✓ Exported ${messages.length.toLocaleString()} messages as "${filename}.docx"`, true);
+
+  } catch (err) {
+    console.error('Export failed:', err);
+    showToast('Export error: ' + err.message, false);
+  } finally {
+    const stillHasSelection = selectedIds.size > 0;
+    exportBtn.disabled  = !stillHasSelection;
+    exportBtn2.disabled = !stillHasSelection;
+    exportBtn2.textContent = origText;
+  }
+}
+
+
+// ─────────────────────────────────────────────
+// JSON EXPORT
+// ─────────────────────────────────────────────
+function exportJson() {
+  if (selectedIds.size === 0) return;
+
+  const btn = document.getElementById('exportJsonBtn');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Exporting…';
+
+  try {
+    const messages = allMessages
+      .filter(m => selectedIds.has(m.id))
+      .sort((a, b) => a.dateMs - b.dateMs)
+      .map(m => m._raw);
+
+    const output = {
+      name:     chatMeta.name  || '',
+      type:     chatMeta.type  || '',
+      id:       chatMeta.id    || null,
+      messages,
+    };
+
+    const json = JSON.stringify(output, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const filename = (document.getElementById('filenameInput').value.trim() || 'chat_transcript').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    a.href     = url;
+    a.download = filename + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast(`✓ Exported ${messages.length.toLocaleString()} messages as "${filename}.json"`, true);
+  } catch (err) {
+    console.error('JSON export failed:', err);
+    showToast('Export error: ' + err.message, false);
+  } finally {
+    btn.disabled  = selectedIds.size === 0;
+    btn.textContent = origText;
+  }
+}
+
+// ─────────────────────────────────────────────
+// JUMP TO REPLIED MESSAGE
+// ─────────────────────────────────────────────
+function jumpToMessage(targetId) {
+  // Find the index of the target in filteredMsgs
+  const idx = filteredMsgs.findIndex(m => m.id === targetId);
+  if (idx === -1) {
+    showToast('Original message is not visible (filtered out)', false);
+    return;
+  }
+
+  // If the target hasn't been rendered yet, force-render up to it
+  if (idx >= renderedUpTo) {
+    const sentinel = document.getElementById('loadMoreSentinel');
+    const list = document.getElementById('msgList');
+    const frag = document.createDocumentFragment();
+    let lastDate = renderedUpTo > 0 ? filteredMsgs[renderedUpTo - 1]?._lastRenderedDate : null;
+
+    for (let i = renderedUpTo; i <= idx; i++) {
+      const m = filteredMsgs[i];
+      const dStr = new Date(m.dateMs).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+      if (dStr !== lastDate) {
+        lastDate = dStr;
+        const sep = document.createElement('div');
+        sep.className = 'date-sep';
+        sep.textContent = dStr;
+        frag.appendChild(sep);
+      }
+      frag.appendChild(buildMsgRow(m));
+    }
+    renderedUpTo = idx + 1;
+    list.insertBefore(frag, sentinel);
+
+    const remaining = filteredMsgs.length - renderedUpTo;
+    sentinel.textContent = remaining > 0
+      ? `↓ ${remaining.toLocaleString()} more messages — scroll to load`
+      : '';
+  }
+
+  // Scroll the target into view then flash it
+  const targetRow = document.getElementById('row-' + targetId);
+  if (!targetRow) return;
+
+  targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  targetRow.classList.remove('flash');
+  // Force reflow so re-adding the class re-triggers the animation
+  void targetRow.offsetWidth;
+  targetRow.classList.add('flash');
+  targetRow.addEventListener('animationend', () => targetRow.classList.remove('flash'), { once: true });
+}
+
+let toastTimer;
+function showToast(msg, ok = true) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (ok ? ' ok' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+}
+</script>
+</body>
+</html>
